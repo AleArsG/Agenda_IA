@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agenda inteligente</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d1b18;--mut:#6b665e;--line:#ddd8cd;--acc:#3b3fd8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--class:#0b7bb5;--assessment:#c8283f;--task:#b8750a;--birthday:#c23a8a;--general:#17855a;--study:#6d3fd0}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15140f;--card:#1f1d17;--ink:#eeeae0;--mut:#9c968a;--line:#37342b;--acc:#8f93ff}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Atkinson Hyperlegible",system-ui,sans-serif}
+.app{display:grid;gap:12px;padding:12px;max-width:1200px;margin:auto}
+@media(min-width:900px){.app{grid-template-columns:1fr 340px}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+h1{font-size:20px;margin:0 0 8px}h2{font-size:14px;margin:0 0 6px}
+button,input,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:5px 10px}
+button{cursor:pointer}button.on{background:var(--ink);color:var(--bg)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
+.ev{border-left:4px solid var(--c);background:color-mix(in srgb,var(--c) 12%,var(--card));border-radius:5px;padding:2px 6px;margin:3px 0;font-size:12px}
+.grid{display:grid;gap:6px;grid-template-columns:repeat(7,minmax(0,1fr));overflow-x:auto}
+.day{min-height:90px;border:1px solid var(--line);border-radius:7px;padding:4px;background:var(--card);min-width:84px}
+.day.t{outline:2px solid var(--acc)}.day h3{margin:0;font-size:11px;color:var(--mut)}
+#chat{display:flex;flex-direction:column;height:min(78vh,620px)}
+#log{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px;padding:6px 0}
+.m{padding:7px 10px;border-radius:10px;max-width:92%;white-space:pre-wrap;font-size:14px;background:color-mix(in srgb,var(--ink) 8%,var(--card))}
+.m.u{align-self:flex-end;background:var(--acc);color:var(--bg)}
+.q button{font-size:12px;border-radius:99px;padding:2px 8px}
+.ev{position:relative}.ev .x{position:absolute;top:-8px;right:-3px;width:24px;height:24px;border-radius:50%;padding:0;border:0;font-size:12px;line-height:1;color:#fff;background:var(--assessment);z-index:2}.ev .x.mv{background:var(--acc);color:var(--bg)}button.on{outline:2px solid var(--acc)}
+#al div{font-size:13px;margin:2px 0}
+</style></head><body>
+<div class="app"><main>
+<h1>Agenda inteligente</h1>
+<div class="card"><h2>Alertas</h2><div id="al"></div></div>
+<div class="row" id="views"></div><div class="row" id="filters"></div><div class="row" id="legend"></div>
+<div id="cal"></div>
+<div class="row"><button id="acc" hidden>Aceptar bloques sugeridos</button></div>
+<div class="card row"><input id="ft" placeholder="Título"><select id="fk"></select><input id="fd" type="date"><input id="fh" type="time" value="10:00"><button id="fa">Agregar</button><button id="fm">Reagendar</button><button id="fe">Eliminar</button></div>
+</main>
+<aside class="card" id="chat"><h2>Tutor (demo con reglas locales)</h2><div id="log"></div>
+<div class="row q" id="qs"></div>
+<form class="row" id="f" style="flex-wrap:nowrap"><input id="in" style="flex:1;min-width:0" placeholder="Escribe al Tutor…"><button>Enviar</button></form></aside></div>
+<script>
+const $=id=>document.getElementById(id);
+const TYPES={class:"Clase",assessment:"Prueba",task:"Tarea",birthday:"Cumpleaños",general:"Evento",study:"Estudio"};
+const ACAD=["class","assessment","task"];
+const pad=n=>String(n).padStart(2,"0");
+const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+const at=(n,h,m=0)=>`${ymd(addD(new Date(),n))}T${pad(h)}:${pad(m)}`;
+const uid=()=>Math.random().toString(36).slice(2,9);
+let ev=[];
+let ses=[],view="week",filt="all",mode=null;
+function items(){const f=e=>filt=="all"||(filt=="academic")==ACAD.includes(e.type);
+return [...ev.filter(f),...(filt=="personal"?[]:ses.map(s=>({id:s.id,type:"study",title:"Estudio: "+s.topics,start:s.start,sub:s.ok?"":" (sugerido)"})))].sort((a,b)=>a.start.localeCompare(b.start))}
+const chip=i=>{const h=i.start.slice(11,16);return `<div class="ev" style="--c:var(--${i.type})"><b>${h=="00:00"?"":h}</b> ${i.title}${i.sub||""}${mode?`<button class="x ${mode}" data-${mode}="${i.id}" aria-label="${mode=="del"?"Eliminar":"Reagendar"}">${mode=="del"?"✕":"✎"}</button>`:""}</div>`};
+function render(){
+const it=items(),now=new Date(),t=ymd(now),on=d=>it.filter(i=>i.start.startsWith(ymd(d))).map(chip).join("");
+const ws=addD(now,-((now.getDay()+6)%7)),ms=new Date(now.getFullYear(),now.getMonth(),1),gs=addD(ms,-((ms.getDay()+6)%7));
+const cell=d=>`<div class="day ${ymd(d)==t?"t":""}" style="${view=="month"&&d.getMonth()!=now.getMonth()?"opacity:.4":""}"><h3>${d.toLocaleDateString("es",{weekday:"short",day:"numeric"})}</h3>${on(d)}</div>`;
+$("cal").innerHTML=view=="week"?`<div class="grid">${[...Array(7)].map((_,i)=>cell(addD(ws,i))).join("")}</div>`:
+view=="month"?`<div class="grid">${[...Array(42)].map((_,i)=>cell(addD(gs,i))).join("")}</div>`:
+`<div style="border-left:2px solid var(--line);padding-left:12px">${on(now)||"<p>Nada para hoy. Pídele al Tutor un bloque de estudio.</p>"}</div>`;
+$("views").innerHTML=[["month","Mes"],["week","Semana"],["today","Hoy"]].map(([k,l])=>`<button class="${view==k?"on":""}" data-v="${k}">${l}</button>`).join("");
+$("filters").innerHTML=[["all","Todo"],["academic","Solo académico"],["personal","Personal"]].map(([k,l])=>`<button class="${filt==k?"on":""}" data-f="${k}">${l}</button>`).join("");
+$("legend").innerHTML=Object.entries(TYPES).map(([k,l])=>`<span class="ev" style="--c:var(--${k});padding:1px 8px">${l}</span>`).join("");
+$("acc").hidden=!ses.some(s=>!s.ok);
+const al=[];ev.forEach(e=>{const h=(new Date(e.start)-now)/36e5;
+if(e.type!="birthday"&&h>0&&h<=6)al.push(`⏰ ${e.title} a las ${e.start.slice(11,16)}`);
+if(e.type=="assessment"&&e.prep<=t&&h>0)al.push(`📚 Te quedan ${Math.ceil(h/24)} días para tu prueba de ${e.subject}. Pendiente: ${e.contents.filter(c=>!c.done).map(c=>c.topic).join(", ")||"todo listo"}`);
+if(e.type=="birthday"&&h>-24&&h<=168)al.push(`🎂 ${e.person}: ${e.start.slice(0,10)}`)});
+$("al").innerHTML=al.map(a=>`<div>${a}</div>`).join("")||"<div>Sin urgencias.</div>"}
+let editId=null;
+document.addEventListener("click",e=>{const b=e.target;if(b.dataset.v){view=b.dataset.v;render()}if(b.dataset.f){filt=b.dataset.f;render()}
+if(b.dataset.del){const id=b.dataset.del;ev=ev.filter(x=>x.id!=id);ses=ses.filter(x=>x.id!=id);if(editId==id)stopEdit();render()}
+if(b.dataset.mv){const id=b.dataset.mv,x=ev.find(y=>y.id==id)||ses.find(y=>y.id==id);if(!x)return;editId=id;$("ft").value=x.title||x.topics;if(x.type)$("fk").value=x.type;$("fd").value=x.start.slice(0,10);$("fh").value=x.start.slice(11,16);$("fa").textContent="Guardar cambios";mode=null;$("fm").className="";$("fe").className="";render();$("ft").focus()}});
+const stopEdit=()=>{editId=null;$("fa").textContent="Agregar";$("ft").value=""};
+const setMode=m=>{mode=mode==m?null:m;$("fm").className=mode=="mv"?"on":"";$("fe").className=mode=="del"?"on":"";render()};
+$("fm").onclick=()=>setMode("mv");$("fe").onclick=()=>setMode("del");
+$("fk").innerHTML=Object.entries(TYPES).filter(([k])=>k!="study").map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
+$("fd").value=ymd(new Date());
+$("fa").onclick=()=>{const T=$("ft").value.trim();if(!T)return;const k=$("fk").value,s=`${$("fd").value}T${$("fh").value}`;
+if(editId){const x=ev.find(y=>y.id==editId)||ses.find(y=>y.id==editId);if(x){const old=x.start;x.start=s;if(x.type){x.title=T;x.type=k;if(x.end){const z=new Date(new Date(s)-0+(new Date(x.end)-new Date(old)));x.end=`${ymd(z)}T${pad(z.getHours())}:${pad(z.getMinutes())}`}}else x.topics=T}stopEdit();render();return}
+ev.push({id:uid(),type:k,title:T,subject:T,person:T,start:s,prep:$("fd").value,contents:[],status:"pending"});$("ft").value="";render()};
+$("acc").onclick=()=>{ses.forEach(s=>s.ok=1);render()};
+// ---- Agente local (en tu proyecto Next.js esto lo hace el LLM vía /api/agent) ----
+const DAYS=["domingo","lunes","martes","miércoles","miercoles","jueves","viernes","sábado","sabado"];
+const upcoming=()=>ev.filter(e=>e.type=="assessment"&&new Date(e.start)>new Date());
+function busy(d,h){return ev.some(e=>e.end&&e.start.startsWith(ymd(d))&&+e.start.slice(11,13)<=h&&h<+e.end.slice(11,13))||ses.some(s=>s.start==`${ymd(d)}T${pad(h)}:00`)||ev.some(e=>e.start.startsWith(ymd(d))&&+e.start.slice(11,13)==h&&e.type!="birthday")}
+function agent(q){const l=q.toLowerCase();
+let m=l.match(/prueba de (.+?) (?:el|este|el próximo|el proximo)\s+(\w+)\s+(?:sobre|de|con)\s+(.+)/);
+if(m){const wd=DAYS.findIndex(x=>x==m[2]);let n=wd>=0?(wd%7?{0:0,1:1,2:2,3:3,4:3,5:4,6:5,7:6,8:6}[wd]:0):1;n=((n-new Date().getDay())+7)%7||7;
+const cs=m[3].split(/,| y /).map(s=>s.trim()).filter(Boolean).map(t=>({id:uid(),topic:t[0].toUpperCase()+t.slice(1),done:false}));
+const sub=m[1][0].toUpperCase()+m[1].slice(1);ev.push({id:uid(),type:"assessment",title:"Prueba "+sub,subject:sub,weightPct:0,start:at(n,10),prep:ymd(addD(new Date(),0)),contents:cs});
+return `Listo: creé la prueba de ${sub} el ${ymd(addD(new Date(),n))} a las 10:00 con ${cs.length} contenidos (${cs.map(c=>c.topic).join(", ")}). Ponderación y hora quedaron por defecto.`}
+const n0=l.normalize("NFD").replace(/[\u0300-\u036f]/g,""),W=["domingo","lunes","martes","miercoles","jueves","viernes","sabado"];
+const stop=["elimina","borra","reagenda","mueve","mover","cambia","prueba","clase","tarea","quita","cancela","para","pasa","evento","bloques","estudio"];
+const find=()=>{const w=n0.split(/\W+/).filter(x=>x.length>3&&!stop.includes(x));return ev.find(e=>w.some(x=>e.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").includes(x)))};
+if(/elimin|borr|quita|cancel/.test(n0)){if(/bloques|estudio/.test(n0)&&!find()){const k=ses.length;ses=[];return k?`Eliminé ${k} bloques de estudio.`:"No hay bloques de estudio."}
+const e=find();if(!e)return "No encontré qué eliminar. Dime el nombre, por ejemplo: «borra la cena familiar».";ev=ev.filter(x=>x!==e);return `Eliminé «${e.title}».`}
+if(/reagend|mueve|mover|cambia|pasa /.test(n0)){const e=find();if(!e)return "¿Cuál evento quieres mover? Ej: «reagenda la cena familiar para el viernes a las 19».";
+const n=/manana/.test(n0)?1:/\bhoy\b/.test(n0)?0:(()=>{const i=W.findIndex(d=>n0.includes(d));return i<0?null:((i-new Date().getDay())+7)%7||7})();
+const tm=n0.match(/a las? (\d{1,2})(?::(\d{2}))?/);if(n==null&&!tm)return `¿Para cuándo muevo «${e.title}»? Ej: «para el viernes a las 19».`;
+const old=e.start,d=n==null?old.slice(0,10):ymd(addD(new Date(),n)),t=tm?`${pad(+tm[1])}:${tm[2]||"00"}`:old.slice(11,16);e.start=`${d}T${t}`;
+if(e.end){const x=new Date(new Date(e.start)-0+(new Date(e.end)-new Date(old)));e.end=`${ymd(x)}T${pad(x.getHours())}:${pad(x.getMinutes())}`}
+return `Moví «${e.title}» al ${d} a las ${t}.`}
+if(/que tengo/.test(n0)&&!/estudiar/.test(n0)){const n=/manana/.test(n0)?1:0,wk=/semana/.test(n0),a=ymd(new Date()),b=ymd(addD(new Date(),6));
+const r=ev.filter(e=>wk?(e.start.slice(0,10)>=a&&e.start.slice(0,10)<=b):e.start.startsWith(ymd(addD(new Date(),n)))).sort((x,y)=>x.start.localeCompare(y.start));
+return r.length?r.map(e=>`• ${e.start.slice(5,10)} ${e.start.slice(11,16)} ${e.title}`).join("\n"):"No tienes nada en ese período."}
+if(/estudi|organ/.test(n0)&&/tarde|\bhoras?\b/.test(n0)){const mp={una:1,un:1,dos:2,tres:3,cuatro:4},m2=n0.match(/(\d|una|un|dos|tres|cuatro) horas?/),N=m2?(mp[m2[1]]||+m2[1]):2;
+const a=upcoming()[0],tp=a?a.contents.filter(c=>!c.done).map(c=>c.topic):[],d=new Date();let c=0;
+for(let h=Math.max(15,d.getHours()+1);h<22&&c<N;h++){if(!busy(d,h)){ses.push({id:uid(),start:`${ymd(d)}T${pad(h)}:00`,topics:(a?a.subject:"Estudio")+" · "+(tp.length?tp[c%tp.length]:"repaso"),ok:0});c++}}
+return c?`Reservé ${c} h de estudio hoy en horas libres, sin chocar con tus clases. Quedan como sugeridos: acéptalos o muévelos con el botón Reagendar.`:"Hoy no hay horas libres entre 15:00 y 22:00."}
+if(/planific|organ|bloques/.test(l)){let c=0;upcoming().forEach(a=>{const pend=a.contents.filter(x=>!x.done);if(!pend.length)return;
+const last=new Date(a.start);let i=0;for(let d=new Date();ymd(d)<ymd(last);d=addD(d,1)){if(ymd(d)<a.prep)continue;
+for(let h=15;h<21;h++){if(!busy(d,h)&&!busy(d,h+1)){const topic=pend[i++%pend.length].topic;ses.push({id:uid(),start:`${ymd(d)}T${pad(h)}:00`,topics:a.subject+" · "+topic,ok:0});c++;break}}}});
+return c?`Propuse ${c} bloques de 1 h sin chocar con tus clases, repartiendo los contenidos pendientes. Revísalos y acéptalos.`:"No hay contenidos pendientes por planificar."}
+if(/hoy|estudiar/.test(l)&&!/contenido/.test(l)){const r=upcoming().filter(a=>a.prep<=ymd(new Date()));
+return r.length?"Hoy toca:\n"+r.map(a=>`• ${a.subject} (${a.weightPct}%): ${a.contents.filter(c=>!c.done).map(c=>c.topic).join(", ")}`).join("\n"):"No tienes pruebas en fase de preparación hoy."}
+if(/contenido|entra|prueba/.test(l)){const w=l.split(/\W+/);const a=upcoming().find(a=>w.some(x=>x.length>3&&a.subject.toLowerCase().includes(x)))||upcoming()[0];
+return a?`${a.title} (${a.start.slice(0,10)}): ${a.contents.map(c=>(c.done?"✓ ":"• ")+c.topic).join("; ")}`:"No tienes pruebas próximas registradas."}
+return "No entendí. Esta demo reconoce frases como:\n• «Qué tengo mañana» / «qué tengo esta semana»\n• «Quiero estudiar 2 horas esta tarde»\n• «Reagenda la cena familiar para el viernes a las 19»\n• «Borra la cena familiar»\n• «El martes tengo prueba de Redes sobre TCP y DNS»\nPara entender cualquier frase se necesita el LLM del proyecto Next.js."}
+const say=(t,c="")=>{const d=document.createElement("div");d.className="m "+c;d.textContent=t;$("log").append(d);$("log").scrollTop=1e9};
+$("f").onsubmit=e=>{e.preventDefault();const q=$("in").value.trim();if(!q)return;say(q,"u");$("in").value="";say(agent(q));render()};
+$("qs").innerHTML=["¿Qué tengo mañana?","Quiero estudiar 2 horas esta tarde","Planifica mis bloques de estudio","¿Qué entra en mi próxima prueba?"].map(q=>`<button type="button">${q}</button>`).join("");
+$("qs").onclick=e=>{if(e.target.tagName=="BUTTON"){$("in").value=e.target.textContent;$("f").requestSubmit()}};
+say("Hola, soy tu Tutor. Esta demo solo entiende frases de ejemplo (toca una sugerencia). Usa los botones Reagendar y Eliminar junto a Agregar: al tocarlos aparece un botón en la esquina de cada evento. En el proyecto Next.js responde un LLM real.");
+render();
+</script></body></html>
